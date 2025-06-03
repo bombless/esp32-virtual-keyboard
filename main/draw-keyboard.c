@@ -9,6 +9,8 @@
 #include "esp_log.h"
 #include "esp_system.h"
 
+#include "esp_timer.h"
+
 // 日志标签
 static const char *TAG = "LED_OLED";
 
@@ -203,7 +205,91 @@ static void ssd1315_show_plain_char(uint8_t x, uint8_t y, char c)
 }
 
 // 在指定位置显示字符
+static void ssd1315_show_char_raw(uint8_t x, uint8_t y, char c, uint8_t width)
+{
+    uint8_t char_index;
+    
+    if (c >= '0' && c <= '9') {
+        char_index = c - '0';
+    } else if (c >= 'A' && c <= 'Z') {
+        char_index = c - 'A' + 10;
+    } else {
+        return; // 不支持的字符
+    }
+    
+    // 设置页地址和列地址
+    ssd1315_write_cmd(0xB0 + y);           // 页地址
+    ssd1315_write_cmd(0x00 + (x & 0x0F));  // 低列地址
+    ssd1315_write_cmd(0x10 + (x >> 4));    // 高列地址
+
+    uint8_t bar = 255;
+    uint8_t empty = 0;
+
+    
+    // 发送字符数据
+    
+    i2c_cmd_handle_t cmd_handle = i2c_cmd_link_create();
+    i2c_master_start(cmd_handle);
+    i2c_master_write_byte(cmd_handle, (OLED_ADDR << 1) | I2C_MASTER_WRITE, false);
+    i2c_master_write_byte(cmd_handle, OLED_DATA_MODE, false);
+
+    i2c_master_write_byte(cmd_handle, bar, false);
+
+    int left_space = (width - 2 - 5) / 2;
+    int right_space = width - 2 - 5 - left_space;
+    for (int i = 0; i < left_space; i += 1) {
+        i2c_master_write_byte(cmd_handle, empty, false);
+    }
+    i2c_master_write(cmd_handle, (uint8_t*)font_5x8[char_index], 5, false);
+    for (int i = 0; i < right_space; i += 1) {
+        i2c_master_write_byte(cmd_handle, empty, false);
+    }
+    i2c_master_write_byte(cmd_handle, bar, false);
+    
+    i2c_master_stop(cmd_handle);
+    
+    i2c_master_cmd_begin(I2C_MASTER_PORT, cmd_handle, 
+                                         I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
+    i2c_cmd_link_delete(cmd_handle);
+}
+
+// 在指定位置显示字符
 static void ssd1315_show_char(uint8_t x, uint8_t y, char c, uint8_t width)
+{
+    uint8_t char_index;
+    
+    if (c >= '0' && c <= '9') {
+        char_index = c - '0';
+    } else if (c >= 'A' && c <= 'Z') {
+        char_index = c - 'A' + 10;
+    } else {
+        return; // 不支持的字符
+    }
+    
+    // 设置页地址和列地址
+    ssd1315_write_cmd(0xB0 + y);           // 页地址
+    ssd1315_write_cmd(0x00 + (x & 0x0F));  // 低列地址
+    ssd1315_write_cmd(0x10 + (x >> 4));    // 高列地址
+
+    uint8_t bar = 255;
+    uint8_t empty = 0;
+
+    
+    // 发送字符数据
+    ssd1315_write_data(&bar, 1);
+
+    int left_space = (width - 2 - 5) / 2;
+    int right_space = width - 2 - 5 - left_space;
+    for (int i = 0; i < left_space; i += 1) {
+        ssd1315_write_data(&empty, 1);
+    }
+    ssd1315_write_data((uint8_t*)font_5x8[char_index], 5);
+    for (int i = 0; i < right_space; i += 1) {
+        ssd1315_write_data(&empty, 1);
+    }
+    ssd1315_write_data(&bar, 1);
+}
+static void ssd1315_show_char_buffer(uint8_t x, uint8_t y, char c, uint8_t width)
 {
     uint8_t buffer[width];
     uint8_t char_index;
@@ -270,7 +356,15 @@ static void ssd1315_show_keyboard()
 {
     uint8_t x = 8;
     for (const char *p = "QWERTYUIOP"; *p; p++) {
-        ssd1315_show_char(x, 0, *p, 12);
+        uint64_t start = esp_timer_get_time();
+        if ((size_t)p % 2) {
+            ssd1315_show_char_raw(x, 0, *p, 12);
+        } else {
+            ssd1315_show_char_buffer(x, 0, *p, 12);
+        }
+        uint64_t end = esp_timer_get_time();
+        ESP_LOGI(TAG, "show char %c cost %lld us (%s)", *p, end - start, ((size_t)p % 2) ? "raw" : "buffer");
+        
         x += 12;
     }
 
