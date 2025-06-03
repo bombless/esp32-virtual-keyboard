@@ -203,8 +203,9 @@ static void ssd1315_show_plain_char(uint8_t x, uint8_t y, char c)
 }
 
 // 在指定位置显示字符
-static void ssd1315_show_char(uint8_t x, uint8_t y, char c)
+static void ssd1315_show_char(uint8_t x, uint8_t y, char c, uint8_t width)
 {
+    uint8_t buffer[width];
     uint8_t char_index;
     
     if (c >= '0' && c <= '9') {
@@ -219,20 +220,27 @@ static void ssd1315_show_char(uint8_t x, uint8_t y, char c)
     ssd1315_write_cmd(0xB0 + y);           // 页地址
     ssd1315_write_cmd(0x00 + (x & 0x0F));  // 低列地址
     ssd1315_write_cmd(0x10 + (x >> 4));    // 高列地址
-    uint8_t buffer[9] = {
-        255,
-        0,
-        font_5x8[char_index][0],
-        font_5x8[char_index][1], 
-        font_5x8[char_index][2],
-        font_5x8[char_index][3], 
-        font_5x8[char_index][4],
-        0,
-        255
-    };
+
+    uint8_t bar = 255;
+    uint8_t empty = 0;
+
+    uint8_t *p = buffer;
     
     // 发送字符数据
-    ssd1315_write_data(buffer, 9);
+    *p++ = bar;
+
+    int left_space = (width - 2 - 5) / 2;
+    int right_space = width - 2 - 5 - left_space;
+    for (int i = 0; i < left_space; i += 1) {
+        *p++ = empty;
+    }
+    memcpy(p, font_5x8[char_index], 5);
+    p += 5;
+    for (int i = 0; i < right_space; i += 1) {
+        *p++ = empty;
+    }
+    *p++ = bar;
+    ssd1315_write_data(buffer, width);
 }
 
 static void ssd1315_show_line(uint8_t x_start, uint8_t x_end, uint8_t y, uint8_t value)
@@ -262,28 +270,28 @@ static void ssd1315_show_keyboard()
 {
     uint8_t x = 8;
     for (const char *p = "QWERTYUIOP"; *p; p++) {
-        ssd1315_show_char(x, 0, *p);
+        ssd1315_show_char(x, 0, *p, 12);
         x += 12;
     }
 
-    ssd1315_show_line(8, 125, 1, 1);
-    ssd1315_show_line(13, 118, 2, 128);
+    ssd1315_show_line(8, 127, 1, 1);
+    ssd1315_show_line(13, 120, 2, 128);
 
     x = 13;
     for (const char *p = "ASDFGHJKL"; *p; p++) {
-        ssd1315_show_char(x, 3, *p);
+        ssd1315_show_char(x, 3, *p, 12);
         x += 12;
     }
 
-    ssd1315_show_line(13, 118, 4, 1);
-    ssd1315_show_line(27, 108, 5, 128);
+    ssd1315_show_line(13, 120, 4, 1);
+    ssd1315_show_line(27, 110, 5, 128);
     
     x = 15;
     for (const char *p = "tZXCVBNM"; *p; p++) {
-        ssd1315_show_char(x, 6, *p);
+        ssd1315_show_char(x, 6, *p, 12);
         x += 12;
     }
-    ssd1315_show_line(27, 108, 7, 1);
+    ssd1315_show_line(27, 110, 7, 1);
 }
 
 // LED和OLED控制任务
