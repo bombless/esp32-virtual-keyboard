@@ -32,7 +32,7 @@ static const char *TAG = "LED_OLED";
 #define OLED_HEIGHT         64
 
 // 闪烁控制
-#define BLINK_PERIOD_MS     500
+#define BLINK_PERIOD_MS     3500
 static bool led_state = false;
 static bool oled_state = false;
 
@@ -181,7 +181,7 @@ static void ssd1315_clear(void)
 }
 
 // 在指定位置显示字符
-static void ssd1315_show_char(uint8_t x, uint8_t y, char c)
+static void ssd1315_show_plain_char(uint8_t x, uint8_t y, char c)
 {
     uint8_t char_index;
     
@@ -202,19 +202,88 @@ static void ssd1315_show_char(uint8_t x, uint8_t y, char c)
     ssd1315_write_data((uint8_t*)font_5x8[char_index], 5);
 }
 
-// 显示字符串
-static void ssd1315_show_string(uint8_t x, uint8_t y, const char* str)
+// 在指定位置显示字符
+static void ssd1315_show_char(uint8_t x, uint8_t y, char c)
 {
-    while (*str) {
-        ssd1315_show_char(x, y, *str);
-        x += 6; // 字符间距
-        if (x > OLED_WIDTH - 6) {
-            x = 0;
-            y++;
-            if (y > 7) break;
-        }
-        str++;
+    uint8_t char_index;
+    
+    if (c >= '0' && c <= '9') {
+        char_index = c - '0';
+    } else if (c >= 'A' && c <= 'Z') {
+        char_index = c - 'A' + 10;
+    } else {
+        return; // 不支持的字符
     }
+    
+    // 设置页地址和列地址
+    ssd1315_write_cmd(0xB0 + y);           // 页地址
+    ssd1315_write_cmd(0x00 + (x & 0x0F));  // 低列地址
+    ssd1315_write_cmd(0x10 + (x >> 4));    // 高列地址
+    uint8_t buffer[9] = {
+        255,
+        0,
+        font_5x8[char_index][0],
+        font_5x8[char_index][1], 
+        font_5x8[char_index][2],
+        font_5x8[char_index][3], 
+        font_5x8[char_index][4],
+        0,
+        255
+    };
+    
+    // 发送字符数据
+    ssd1315_write_data(buffer, 9);
+}
+
+static void ssd1315_show_line(uint8_t x_start, uint8_t x_end, uint8_t y, uint8_t value)
+{
+    // 设置页地址和列地址
+    ssd1315_write_cmd(0xB0 + y); // 页地址
+    ssd1315_write_cmd(0x00);     // 低列地址0
+    ssd1315_write_cmd(0x10);     // 高列地址0
+    uint8_t buffer[128];
+
+    for (int i = 0; i < 128; i += 1) {
+        if (i < x_start || i >= x_end) {
+            buffer[i] = 0x00;
+        } else {
+            buffer[i] = value;
+        }
+    }
+    
+    // 发送字符数据
+    ssd1315_write_data(buffer, 128);
+}
+
+
+
+// 显示字符串
+static void ssd1315_show_keyboard()
+{
+    uint8_t x = 8;
+    for (const char *p = "QWERTYUIOP"; *p; p++) {
+        ssd1315_show_char(x, 0, *p);
+        x += 12;
+    }
+
+    ssd1315_show_line(8, 125, 1, 1);
+    ssd1315_show_line(13, 118, 2, 128);
+
+    x = 13;
+    for (const char *p = "ASDFGHJKL"; *p; p++) {
+        ssd1315_show_char(x, 3, *p);
+        x += 12;
+    }
+
+    ssd1315_show_line(13, 118, 4, 1);
+    ssd1315_show_line(27, 108, 5, 128);
+    
+    x = 15;
+    for (const char *p = "tZXCVBNM"; *p; p++) {
+        ssd1315_show_char(x, 6, *p);
+        x += 12;
+    }
+    ssd1315_show_line(27, 108, 7, 1);
 }
 
 // LED和OLED控制任务
@@ -230,22 +299,19 @@ static void blink_task(void *arg)
         
         // 切换OLED显示状态
         oled_state = !oled_state;
-        
+
         if (oled_state) {
-            // 显示内容
-            ssd1315_clear();
-            ssd1315_show_string(20, 1, "ESP32");
-            ssd1315_show_string(10, 3, "LED");
-            ssd1315_show_string(50, 3, led_state ? "ON" : "OFF");
-            ssd1315_show_string(10, 5, "OLED");
-            ssd1315_show_string(50, 5, "ON");
-            ssd1315_show_string(0, 7, "GHOST IN THE SHELL");
+            ssd1315_show_keyboard();
         } else {
-            // 清空显示
             ssd1315_clear();
-            ssd1315_show_string(0, 7, "GHOST IN THE SHELL");
+            int x = 0;
+            for (const char *p = "HELLO WORLD"; *p; p++) {
+                x += 9;
+                ssd1315_show_plain_char(x, 4, *p);
+            }            
         }
-        
+
+
         // 输出状态日志
         ESP_LOGI(TAG, "LED: %s | OLED: %s", 
                  led_state ? "ON" : "OFF", 
@@ -288,16 +354,16 @@ void app_main(void)
     // 初始化SSD1315
     ESP_ERROR_CHECK(ssd1315_init());
     
-    // 显示初始信息
-    ssd1315_clear();
-    ssd1315_show_string(15, 2, "ESP32");
-    ssd1315_show_string(5, 4, "STARTING");
-    
-    // 延时2秒显示启动信息
-    vTaskDelay(pdMS_TO_TICKS(2000));
-    
     // 创建闪烁任务
     xTaskCreate(blink_task, "blink_task", 4096, NULL, 5, NULL);
+    // ssd1315_clear();
+    ssd1315_show_keyboard();
+    // ssd1315_show_char(0, 4, 'A');
+    // ssd1315_show_lines(0, 5);
+    // ssd1315_show_char(0, 6, 'B');
+    // ssd1315_show_lines(0, 7);
+    // ssd1315_show_lines(0, 1);
+    // ssd1315_show_lines(10, 3);
     
     ESP_LOGI(TAG, "闪烁任务已启动");
 }
